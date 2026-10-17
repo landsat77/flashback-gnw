@@ -1,0 +1,48 @@
+Flashback for Game & Watch Retro-Go SD — licenses
+==================================================
+
+This project combines code under different terms.
+
+1. REminiscence (src/rs/, except opl3.c, opl3.h)
+   Copyright (C) 2005-2019 Gregory Montoir (cyx@users.sourceforge.net)
+
+   REminiscence has no public license. It is used, modified and distributed
+   in this project with the permission of its author. That permission does
+   not extend to other projects: ask the author before reusing this code.
+
+2. Nuked OPL3 (src/rs/opl3.c, src/rs/opl3.h)
+   Copyright (C) 2013-2020 Nuke.YKT
+   GNU Lesser General Public License, version 2.1 or later
+   (src/rs/opl3.LICENSE). Only used by the music renderer (harness/,
+   fb_render), not by the Game & Watch binary.
+
+3. Retro-Go SD SDK (sdk/)
+   MIT License (sdk/LICENSE.MIT). Vendored firmware headers keep their own
+   licenses.
+
+4. The code written for this port (src/port/, tools/, harness/, scripts/)
+   MIT License:
+
+   Copyright (c) 2026 Flashback for Game & Watch contributors
+
+   Permission is hereby granted, free of charge, to any person obtaining a
+   copy of this software and associated documentation files (the
+   "Software"), to deal in the Software without restriction, including
+   without limitation the rights to use, copy, modify, merge, publish,
+   distribute, sublicense, and/or sell copies of the Software, and to permit
+   persons to whom the Software is furnished to do so, subject to the
+   following conditions:
+
+   The above copyright notice and this permission notice shall be included
+   in all copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+   NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+   DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+   OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+   USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Flashback is a game by Delphine Software International. The game data is
+not part of this project.
