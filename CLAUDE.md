@@ -51,6 +51,12 @@ this file is the SDK's generic porting guide (memory map, audio, ABI).
   scripts, PPM/WAV, -l level, -q/-Q save, -j/-J load, -L boot load, -g/-G
   language, -R render music, -C cutscene test). The pack is mmapped
   PROT_READ (read() on Windows).
+- Sound (v1.0.1): the firmware's PCM ring (pcm_attach): fb_main.c keeps
+  8192 samples, filled 4096 ahead (~186 ms) at every service; the SAI ISR
+  fills the DMA halves from it. The old pull of one DMA half per service
+  was choppy on the console in the intro (cutscene frames longer than a
+  half buffer; gwemu does not show it). Stats every 5 s, the first minute
+  in <save dir>/log.txt.
 - Device test: gwemu (fw-rc1) with QMP; keys x = A, z = B, esc = PAUSE/SET,
   ret = GAME.
 

@@ -7,6 +7,20 @@ section as the GitHub Release notes.
 
 ## [Unreleased]
 
+## [v1.0.1] - 2026-10-18
+
+### Fixed
+
+- Choppy sound during the intro on the console: the audio is now fed by the
+  firmware's interrupt from a ring the game fills about 186 ms ahead
+  (Retro-Go SD PCM ring), so the long drawing of the cutscenes no longer
+  leaves DMA half buffers unfilled.
+
+### Added
+
+- The first minute of audio statistics (longest gap between two refills,
+  underruns) is written to `/data/flashback/<name>/log.txt` on the SD card.
+
 ## [v1.0.0] - 2026-10-18
 
 ### Added

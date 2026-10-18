@@ -36,7 +36,13 @@
 #include "gw_core_bridge.h" /* last: rewrites ACTIVE_FILE, common_emu_state, dma_counter */
 
 #define FB_SAMPLE_RATE         22050
+/* Audio: the firmware's interrupt fills each DMA half buffer (16.7 ms)
+ * from a ring the game fills ahead (FB_RING_AHEAD samples, ~186 ms): the
+ * sound does not depend on when the game gets to it (the cutscenes draw
+ * for a long time between two waits). */
 #define FB_AUDIO_BUFFER_LENGTH 368      /* ~16.7 ms per DMA half buffer */
+#define FB_RING_SIZE  8192   /* power of 2 */
+#define FB_RING_AHEAD 4096
 #define FB_TICK_MS             16       /* buttons / menu / overlay rate */
 
 static odroid_gamepad_state_t joystick;
@@ -61,6 +67,12 @@ static bool refresh_needed;
 static uint32_t last_present_ms;
 
 static uint32_t last_dma_counter;
+static void feed_audio(void);
+static void ring_stop(void);
+/* statistics (log every 5 s, the first minute also in <save dir>/log.txt) */
+static uint32_t stat_t0, stat_audio_missed, stat_max_gap_ms, last_feed_ms;
+static FILE *stat_log;
+static int stat_log_lines;
 static uint32_t last_tick_ms;
 static int in_service;
 static bool game_running;
@@ -136,6 +148,7 @@ static void show_error(const char *msg, const char *detail);
 
 void fb_plat_fatal(const char *msg)
 {
+    ring_stop();
     audio_stop_playing();
     show_error("Flashback error:", msg);
     while (1)
@@ -145,6 +158,7 @@ void fb_plat_fatal(const char *msg)
 void fb_plat_quit(void)
 {
     printf("fb: game quit\n");
+    ring_stop();
     audio_stop_playing();
     odroid_system_switch_app(0);
     while (1)
@@ -326,22 +340,83 @@ static void *screenshot(void)
 /* ------------------------------------------------------------------ */
 /* Audio                                                              */
 /* ------------------------------------------------------------------ */
+static int16_t ring[FB_RING_SIZE];
+static volatile uint16_t ring_head, ring_tail; /* written / read (interrupt) */
+static uint32_t ring_written;                  /* samples written in all */
+static bool ring_on;
+
+static void ring_start(void)
+{
+    ring_head = ring_tail = 0;
+    ring_written = 0;
+    pcm_attach(ring, FB_RING_SIZE, &ring_head, &ring_tail);
+    pcm_audio_setpos(0);
+    pcm_audio_set(common_emu_sound_get_volume(), 1);
+    pcm_audio_enable(1);
+    ring_on = true;
+}
+
+static void ring_stop(void)
+{
+    if (ring_on)
+        pcm_audio_enable(0);
+    ring_on = false;
+}
+
+static void log_stats(uint32_t now)
+{
+    if (now - stat_t0 < 5000)
+        return;
+    char line[120];
+    snprintf(line, sizeof(line), "fb: longest gap %lu ms, audio underrun %lu samples\n",
+             (unsigned long)stat_max_gap_ms, (unsigned long)stat_audio_missed);
+    printf("%s", line);
+    if (stat_log && stat_log_lines < 12) {
+        fputs(line, stat_log);
+        if (++stat_log_lines == 12) {
+            fclose(stat_log);
+            stat_log = NULL;
+        }
+    }
+    stat_audio_missed = 0;
+    stat_max_gap_ms = 0;
+    stat_t0 = now;
+}
+
+/* tops the ring up to FB_RING_AHEAD samples ahead of the interrupt */
 static void feed_audio(void)
 {
-    if (dma_counter == last_dma_counter)
+    if (!ring_on)
         return;
-    last_dma_counter = dma_counter;
-    int16_t *buf = audio_get_active_buffer();
-    uint16_t len = audio_get_buffer_length();
-    /* always render: keeps the music and the sounds moving */
-    fb_core_audio_render(buf, len);
-    if (common_emu_sound_loop_is_muted()) {
-        audio_clear_active_buffer();
-        return;
+    uint32_t now = get_elapsed_time();
+    if (now - last_feed_ms > stat_max_gap_ms && now - last_feed_ms < 10000)
+        stat_max_gap_ms = now - last_feed_ms;
+    last_feed_ms = now;
+    /* the interrupt played silence when the ring was empty */
+    uint32_t played = pcm_audio_pos();
+    if ((int32_t)(played - ring_written) > 0) {
+        stat_audio_missed += played - ring_written;
+        ring_written = played;
     }
-    int32_t factor = common_emu_sound_get_volume();
-    for (int i = 0; i < len; i++)
-        buf[i] = (int16_t)(((int32_t)buf[i] * factor) >> 8);
+    bool muted = common_emu_sound_loop_is_muted();
+    pcm_audio_set(common_emu_sound_get_volume(), muted ? 0 : 1);
+    uint16_t tail = ring_tail;
+    int level = (ring_head - tail) & (FB_RING_SIZE - 1);
+    int want = FB_RING_AHEAD - level;
+    while (want > 0) {
+        int head = ring_head;
+        int n = want;
+        if (n > FB_RING_SIZE - head)
+            n = FB_RING_SIZE - head; /* up to the end of the ring */
+        if (n > 512)
+            n = 512;
+        /* always render: keeps the music and the sounds moving */
+        fb_core_audio_render(ring + head, n);
+        ring_head = (uint16_t)((head + n) & (FB_RING_SIZE - 1));
+        ring_written += n;
+        want -= n;
+    }
+    log_stats(now);
 }
 
 /* ------------------------------------------------------------------ */
@@ -510,6 +585,7 @@ static void run_input_loop(void)
     /* the time spent in the menu does not count */
     last_tick_ms = get_elapsed_time();
     last_dma_counter = dma_counter;
+    last_feed_ms = last_tick_ms;
 }
 
 void fb_plat_service(int in_delay)
@@ -682,7 +758,14 @@ void app_main(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
     lcd_clear_buffers();
     audio_start_playing(FB_AUDIO_BUFFER_LENGTH);
     last_dma_counter = dma_counter;
+    ring_start();
+    {
+        char path[220];
+        snprintf(path, sizeof(path), "%s/log.txt", save_dir);
+        stat_log = fopen(path, "w");
+    }
     last_tick_ms = get_elapsed_time();
+    last_feed_ms = stat_t0 = last_tick_ms;
 
     fb_core_options_t opts;
     memset(&opts, 0, sizeof(opts));
