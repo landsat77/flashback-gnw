@@ -9,6 +9,9 @@ on:
   pull_request:
     branches:
       - main
+  # a release made on github.com (it also makes the tag)
+  release:
+    types: [published]
 
 # Cancel superseded runs on the same ref (keeps PR feedback fast).
 concurrency:
@@ -72,7 +75,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: (github.event_name == 'push' || github.event_name == 'release') && startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -91,6 +94,17 @@ jobs:
         with:
           name: build-artifacts
           path: dist
+
+      - name: Set up Python (zig for the music renderers)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build the music renderers (Linux, Windows, macOS)
+        run: |
+          set -euo pipefail
+          python3 -m pip install ziglang
+          tools/build_renderers.sh
 
       - name: Stage release assets
         run: |
@@ -118,7 +132,14 @@ jobs:
           for name in "${names[@]}"; do
             files+=("release/${name}")
           done
-          gh release create "${TAG}" \
-            --title "${TAG}" \
-            --notes-file release/RELEASE_NOTES.md \
-            "${files[@]}"
+          # The release may already exist (made on github.com, which also
+          # makes the tag): add / replace the files and the notes.
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" --clobber "${files[@]}"
+            gh release edit "${TAG}" --notes-file release/RELEASE_NOTES.md
+          else
+            gh release create "${TAG}" \
+              --title "${TAG}" \
+              --notes-file release/RELEASE_NOTES.md \
+              "${files[@]}"
+          fi
